@@ -61,26 +61,39 @@ filtered_df = df[
 if selected_meds:
     filtered_df = filtered_df[filtered_df['Interventions'].apply(lambda x: any(m in x for m in selected_meds))]
 
-# Medicine bubble chart data
+# Medicine bubble chart: each bubble = a unique medicine, size = number of trials using it
 exploded = df[['NCT Number', 'Interventions']].copy()
 exploded['Interventions'] = exploded['Interventions'].str.split(';')
 exploded = exploded.explode('Interventions')
 exploded['Interventions'] = exploded['Interventions'].str.strip()
-med_count = exploded.groupby('Interventions')['NCT Number'].count().reset_index()
+
+med_count = exploded.groupby('Interventions')['NCT Number'].nunique().reset_index()
 med_count.columns = ['Medicine', 'Trial Count']
 
-med_bubble_fig = px.scatter(med_count, x="Medicine", y="Trial Count", size="Trial Count", color="Trial Count", height=600,
-                            title="Number of Trials Using Each Medicine")
+med_bubble_fig = px.scatter(
+    med_count,
+    x='Medicine',
+    y='Trial Count',
+    size='Trial Count',
+    color='Trial Count',
+    title='Number of Clinical Trials Using Each Medicine',
+    size_max=60,
+    height=600
+)
 med_bubble_fig.update_layout(xaxis_tickangle=-45)
 
 # Pie chart for trial phases
 phase_counts = filtered_df['Phases'].value_counts().reset_index()
 phase_counts.columns = ['Phase', 'Trial Count']
-phase_pie = px.pie(phase_counts, names='Phase', values='Trial Count',
-                   title='Distribution of Filtered Trials by Clinical Trial Phase',
-                   hole=0.4)
+phase_pie = px.pie(
+    phase_counts,
+    names='Phase',
+    values='Trial Count',
+    title='Distribution of Filtered Trials by Clinical Trial Phase',
+    hole=0.4
+)
 
-# Outcome grouping & pie chart
+# Highlight terms in outcome text
 highlight_terms = ['hemoglobin', 'pain', 'hospitalization', 'vaso-occlusive', 'crisis', 'transfusion', 'fatigue']
 def highlight_common(text):
     for term in highlight_terms:
@@ -88,40 +101,8 @@ def highlight_common(text):
         text = pattern.sub(r"🔹 **\1**", text)
     return text
 
-def group_similar_outcomes(df):
-    texts = df['Primary Outcome Measures'].tolist()
-    vectorizer = TfidfVectorizer(stop_words='english')
-    tfidf = vectorizer.fit_transform(texts)
-    sim = cosine_similarity(tfidf)
-    groups = []
-    visited = set()
-    for i in range(len(texts)):
-        if i in visited:
-            continue
-        group = [i]
-        for j in range(i+1, len(texts)):
-            if sim[i, j] > 0.7:
-                group.append(j)
-                visited.add(j)
-        if len(group) > 1:
-            groups.append(group)
-    return groups
-
-outcome_texts = df[['NCT Number', 'Study Title', 'Primary Outcome Measures', 'Study URL']]
-outcome_texts = outcome_texts[outcome_texts['Primary Outcome Measures'] != ""]
-groups = group_similar_outcomes(outcome_texts)
-
-pie_data = defaultdict(int)
-for i, group in enumerate(groups):
-    pie_data[f"Group {i+1}"] = len(group)
-
-pie_df = pd.DataFrame(pie_data.items(), columns=['Group', 'Trial Count'])
-
-outcome_pie_chart = px.pie(pie_df, names='Group', values='Trial Count',
-                           title="Distribution of Similar Outcome Groups", hole=0.4) if not pie_df.empty else None
-
-# Tabs with 2 tabs only
-tab1, tab2 = st.tabs(["Trial Data & Visuals", "Multiple Graphs"])
+# Tabs (2 only for speed)
+tab1, tab2 = st.tabs(["Trial Data & Visuals", "Phase Distribution"])
 
 with tab1:
     st.markdown(f"### Total Trials in Dataset: **{df.shape[0]}**")
@@ -165,14 +146,6 @@ with tab1:
     )
 
 with tab2:
-    st.subheader("📊 Outcome Similarity Pie Chart")
-    if outcome_pie_chart:
-        st.plotly_chart(outcome_pie_chart, use_container_width=True)
-    else:
-        st.info("Not enough similar outcomes to display chart.")
-
-    st.markdown("---")
-
     st.subheader("📊 Clinical Trial Distribution by Phase")
     if not phase_counts.empty:
         st.plotly_chart(phase_pie, use_container_width=True)
