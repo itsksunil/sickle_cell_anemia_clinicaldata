@@ -1,230 +1,238 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from datetime import datetime
 
-# Set matplotlib style
+# Set style
 plt.style.use('ggplot')
+st.set_page_config(layout="wide")
 
-# Load and cache the data
 @st.cache_data
 def load_data():
-    df = pd.read_csv('sickle_cell_anemia_clinicaldata.csv')
+    df = pd.read_csv('sca.csv')
+    # Clean and preprocess data
     df.fillna('', inplace=True)
     df['Completion Date'] = pd.to_datetime(df['Completion Date'], errors='coerce')
+    df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
     df['Completion Year'] = df['Completion Date'].dt.year
+    df['Start Year'] = df['Start Date'].dt.year
     df['Enrollment'] = pd.to_numeric(df['Enrollment'], errors='coerce')
+    df['Study Duration'] = (df['Completion Date'] - df['Start Date']).dt.days
     return df
 
 df = load_data()
 
-st.title("sickle cell anemiaclinicaldataTrials Explorer 1700+ clinical trial 🧬")
-
-# Utility: extract unique keywords from pipe-separated fields
-def get_unique_keywords(series):
-    keywords = set()
-    for val in series:
-        if val:
-            keywords.update([x.strip() for x in val.split('|')])
-    return sorted(keywords)
-
-# Prepare filter values
-conditions = get_unique_keywords(df['Conditions'])
-interventions = get_unique_keywords(df['Interventions'])
-phases = sorted([p for p in df['Phases'].unique() if p])
+# Title and description
+st.title("Sickle Cell Anemia Clinical Trials Analysis")
+st.markdown("""
+This dashboard provides insights into clinical trials for sickle cell anemia (SCA) from around the world.
+Explore the data using the filters below.
+""")
 
 # Sidebar filters
-st.sidebar.header("🔍 Filter Trials")
+st.sidebar.header("Filter Trials")
+selected_status = st.sidebar.multiselect(
+    "Study Status",
+    options=sorted(df['Study Status'].unique()),
+    default=['RECRUITING', 'COMPLETED', 'ACTIVE']
+)
 
-selected_condition = st.sidebar.selectbox("Cancer Type", ["All"] + conditions)
-selected_intervention = st.sidebar.selectbox("Intervention/Drug", ["All"] + interventions)
-selected_phase = st.sidebar.selectbox("Phase", ["All"] + phases)
+selected_phase = st.sidebar.multiselect(
+    "Phase",
+    options=sorted([p for p in df['Phases'].unique() if p]),
+    default=sorted([p for p in df['Phases'].unique() if p])
+)
 
-# Date Range filter
-min_date = df['Completion Date'].min()
-max_date = df['Completion Date'].max()
-start_date, end_date = st.sidebar.date_input(
-    "Completion Date Range", value=(min_date, max_date), min_value=min_date, max_value=max_date
+selected_country = st.sidebar.multiselect(
+    "Country",
+    options=sorted(df['Country'].unique()),
+    default=sorted(df['Country'].unique())
+)
+
+min_enroll, max_enroll = st.sidebar.slider(
+    "Enrollment Range",
+    min_value=0,
+    max_value=int(df['Enrollment'].max()),
+    value=(0, int(df['Enrollment'].max()))
 )
 
 # Apply filters
-filtered_df = df.copy()
-
-if selected_condition != "All":
-    filtered_df = filtered_df[filtered_df['Conditions'].str.contains(selected_condition, case=False, na=False)]
-if selected_intervention != "All":
-    filtered_df = filtered_df[filtered_df['Interventions'].str.contains(selected_intervention, case=False, na=False)]
-if selected_phase != "All":
-    filtered_df = filtered_df[filtered_df['Phases'] == selected_phase]
-
-# Filter by date range
-filtered_df = filtered_df[
-    (filtered_df['Completion Date'] >= pd.to_datetime(start_date)) &
-    (filtered_df['Completion Date'] <= pd.to_datetime(end_date))
+filtered_df = df[
+    (df['Study Status'].isin(selected_status)) &
+    (df['Phases'].isin(selected_phase)) &
+    (df['Country'].isin(selected_country)) &
+    (df['Enrollment'] >= min_enroll) &
+    (df['Enrollment'] <= max_enroll)
 ]
 
-st.markdown(f"### 🎯 {len(filtered_df)} trials found")
+# Key metrics
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Total Trials", len(filtered_df))
+col2.metric("Average Enrollment", int(filtered_df['Enrollment'].mean()))
+col3.metric("Completed Trials", len(filtered_df[filtered_df['Study Status'] == 'COMPLETED']))
+col4.metric("Recruiting Trials", len(filtered_df[filtered_df['Study Status'] == 'RECRUITING']))
 
-# --------------------------
-# TRIALS OVERVIEW VISUALIZATION
-# --------------------------
-st.markdown("## 📊 Trial Overview Visualizations")
+# Main tabs
+tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Interventions", "Geographic", "Trial Details"])
 
-col1, col2 = st.columns(2)
-
-with col1:
-    # Trials by Phase (Matplotlib bar chart)
-    if not filtered_df.empty:
-        fig, ax = plt.subplots(figsize=(8, 4))
+with tab1:
+    st.header("Trial Overview")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        # Trials by Phase
+        fig, ax = plt.subplots(figsize=(10, 6))
         phase_counts = filtered_df['Phases'].value_counts()
-        phase_counts.plot(kind='bar', color=['#1f77b4', '#ff7f0e', '#2ca02c'], ax=ax)
+        phase_counts.plot(kind='bar', color=sns.color_palette("viridis", len(phase_counts)), ax=ax)
         plt.title('Trials by Phase')
         plt.xlabel('Phase')
         plt.ylabel('Number of Trials')
         plt.xticks(rotation=45)
         st.pyplot(fig)
-    else:
-        st.warning("No data to display for Trials by Phase")
-
-with col2:
-    # Trials Over Time (Matplotlib line chart)
-    if not filtered_df.empty and 'Completion Year' in filtered_df.columns:
-        fig, ax = plt.subplots(figsize=(8, 4))
-        yearly_counts = filtered_df['Completion Year'].value_counts().sort_index()
-        yearly_counts.plot(kind='line', marker='o', color='green', ax=ax)
-        plt.title('Trials Completed Over Time')
-        plt.xlabel('Year')
-        plt.ylabel('Number of Trials')
+    
+    with col2:
+        # Trials by Status
+        fig, ax = plt.subplots(figsize=(10, 6))
+        status_counts = filtered_df['Study Status'].value_counts()
+        status_counts.plot(kind='pie', autopct='%1.1f%%', 
+                         colors=sns.color_palette("pastel", len(status_counts)), ax=ax)
+        plt.title('Trial Status Distribution')
+        plt.ylabel('')
         st.pyplot(fig)
-    else:
-        st.warning("No data to display for Trials Over Time")
-
-# Enrollment Distribution (Matplotlib histogram)
-if not filtered_df.empty and 'Enrollment' in filtered_df.columns:
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.hist(filtered_df['Enrollment'].dropna(), bins=20, color='purple', edgecolor='black')
-    plt.title('Distribution of Enrollment Numbers')
-    plt.xlabel('Number of Participants')
-    plt.ylabel('Frequency')
+    
+    # Trials Over Time
+    fig, ax = plt.subplots(figsize=(12, 6))
+    yearly_counts = filtered_df.groupby(['Start Year', 'Study Status']).size().unstack()
+    yearly_counts.plot(kind='bar', stacked=True, ax=ax, 
+                      colormap='viridis', width=0.8)
+    plt.title('Trials Started by Year and Status')
+    plt.xlabel('Year')
+    plt.ylabel('Number of Trials')
+    plt.xticks(rotation=45)
+    plt.legend(title='Status', bbox_to_anchor=(1.05, 1), loc='upper left')
     st.pyplot(fig)
 
-# --------------------------
-# MAIN TRIAL DATA TABLE
-# --------------------------
-st.markdown("## 📋 Trial Data Table")
-st.dataframe(filtered_df[[
-    'NCT Number', 'Study Title', 'Conditions', 'Interventions', 
-    'Phases', 'Enrollment', 'Completion Date'
-]])
-
-st.markdown("---")
-
-# --------------------------
-# EXPLORE RELATED CANCER TYPES
-# --------------------------
-st.subheader("🔎 Explore Related Cancer Types")
-explore_conditions = get_unique_keywords(filtered_df['Conditions'])
-explore_cond = st.selectbox("Explore Cancer Type Trials:", options=["Select"] + explore_conditions)
-
-if explore_cond != "Select":
-    subset = df[df['Conditions'].str.contains(explore_cond, case=False, na=False)]
-    st.markdown(f"### Trials related to **{explore_cond}** ({len(subset)})")
+with tab2:
+    st.header("Treatment Interventions")
     
-    # Visualization for the selected cancer type
-    if not subset.empty:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig, ax = plt.subplots(figsize=(8, 4))
-            subset['Phases'].value_counts().plot(
-                kind='pie', autopct='%1.1f%%', 
-                colors=['#ff9999','#66b3ff','#99ff99'],
-                ax=ax
-            )
-            plt.title(f'Phase Distribution for {explore_cond}')
-            plt.ylabel('')
-            st.pyplot(fig)
-        
-        with col2:
-            if 'Completion Year' in subset.columns:
-                fig, ax = plt.subplots(figsize=(8, 4))
-                subset['Completion Year'].value_counts().sort_index().plot(
-                    kind='bar', color='skyblue', ax=ax
-                )
-                plt.title(f'Trials Over Time for {explore_cond}')
-                plt.xlabel('Year')
-                plt.ylabel('Number of Trials')
-                plt.xticks(rotation=45)
-                st.pyplot(fig)
+    # Get unique interventions
+    interventions = []
+    for val in filtered_df['Interventions']:
+        if val:
+            interventions.extend([x.strip() for x in val.split('|')])
+    intervention_counts = pd.Series(interventions).value_counts().head(15)
     
-    st.dataframe(subset[[
-        'NCT Number', 'Study Title', 'Primary Outcome Measures',
-        'Secondary Outcome Measures', 'Other Outcome Measures'
-    ]])
-
-st.markdown("---")
-
-# --------------------------
-# COMPARE TRIAL OUTCOMES
-# --------------------------
-st.subheader("📈 Compare Clinical Trial Outcomes by Cancer Type")
-
-selected_compare = st.selectbox("Select Cancer Type to Compare Trials:", ["Select"] + conditions)
-
-if selected_compare != "Select":
-    compare_df = df[df['Conditions'].str.contains(selected_compare, case=False, na=False)]
-    st.markdown(f"### Comparing outcomes for **{selected_compare}** ({len(compare_df)} trials)")
-    
-    # Outcome comparison visualizations
-    if not compare_df.empty:
-        st.markdown("#### Outcome Measures Analysis")
-        
-        # Count outcome measures with simplified function
-        def count_measures(series):
-            if series.empty:
-                return 0
-            first_val = str(series.iloc[0])
-            if '|' in first_val:
-                return series.str.split('|').str.len()
-            else:
-                return series.apply(lambda x: 1 if x else 0)
-
-        outcome_measures = pd.DataFrame({
-            'Primary': count_measures(compare_df['Primary Outcome Measures']),
-            'Secondary': count_measures(compare_df['Secondary Outcome Measures']),
-            'Other': count_measures(compare_df['Other Outcome Measures'])
-        })
-        
-        # Plot outcome measures (Matplotlib bar chart)
-        fig, ax = plt.subplots(figsize=(10, 5))
-        outcome_measures.mean().plot(
-            kind='bar', 
-            color=['#4C72B0', '#55A868', '#C44E52'], 
-            ax=ax
-        )
-        plt.title(f'Average Number of Outcome Measures for {selected_compare}')
-        plt.ylabel('Average Number of Measures')
-        plt.xticks(rotation=0)
+    col1, col2 = st.columns(2)
+    with col1:
+        # Top Interventions
+        fig, ax = plt.subplots(figsize=(10, 8))
+        intervention_counts.plot(kind='barh', color='darkblue', ax=ax)
+        plt.title('Top 15 Treatment Interventions')
+        plt.xlabel('Number of Trials')
+        plt.ylabel('Intervention')
         st.pyplot(fig)
-        
-        # Enrollment vs Phase (Matplotlib boxplot)
-        if 'Enrollment' in compare_df.columns and 'Phases' in compare_df.columns:
-            fig, ax = plt.subplots(figsize=(10, 5))
-            
-            # Group data by phase
-            groups = []
-            labels = []
-            for phase in sorted(compare_df['Phases'].unique()):
-                groups.append(compare_df[compare_df['Phases'] == phase]['Enrollment'].dropna())
-                labels.append(phase)
-            
-            ax.boxplot(groups, labels=labels)
-            plt.title(f'Enrollment Distribution by Phase for {selected_compare}')
-            plt.xlabel('Phase')
-            plt.ylabel('Enrollment')
-            st.pyplot(fig)
     
-    st.dataframe(compare_df[[
-        'NCT Number', 'Study Title', 'Phases', 'Enrollment', 'Completion Date',
-        'Primary Outcome Measures', 'Secondary Outcome Measures', 'Other Outcome Measures'
-    ]].reset_index(drop=True))
+    with col2:
+        # Intervention Types
+        intervention_types = []
+        for val in interventions:
+            if 'DRUG' in val:
+                intervention_types.append('Drug')
+            elif 'BIOLOGICAL' in val:
+                intervention_types.append('Biological')
+            elif 'DEVICE' in val:
+                intervention_types.append('Device')
+            elif 'PROCEDURE' in val:
+                intervention_types.append('Procedure')
+            else:
+                intervention_types.append('Other')
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        pd.Series(intervention_types).value_counts().plot(
+            kind='pie', autopct='%1.1f%%', 
+            colors=sns.color_palette("Set3"), ax=ax)
+        plt.title('Intervention Types')
+        plt.ylabel('')
+        st.pyplot(fig)
+    
+    # Intervention by Phase
+    intervention_phase = filtered_df.explode('Interventions').groupby(
+        ['Interventions', 'Phases']).size().unstack().fillna(0)
+    intervention_phase['Total'] = intervention_phase.sum(axis=1)
+    top_interventions = intervention_phase.nlargest(10, 'Total').drop('Total', axis=1)
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    top_interventions.plot(kind='bar', stacked=True, ax=ax, colormap='viridis')
+    plt.title('Top Interventions by Phase')
+    plt.xlabel('Intervention')
+    plt.ylabel('Number of Trials')
+    plt.xticks(rotation=45)
+    plt.legend(title='Phase', bbox_to_anchor=(1.05, 1), loc='upper left')
+    st.pyplot(fig)
+
+with tab3:
+    st.header("Geographic Distribution")
+    
+    # Country distribution
+    country_counts = filtered_df['Country'].value_counts().head(15)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        fig, ax = plt.subplots(figsize=(10, 8))
+        country_counts.plot(kind='barh', color='darkgreen', ax=ax)
+        plt.title('Top 15 Countries with SCA Trials')
+        plt.xlabel('Number of Trials')
+        plt.ylabel('Country')
+        st.pyplot(fig)
+    
+    with col2:
+        # Map visualization (placeholder - would use actual mapping library in production)
+        st.write("""
+        ### Geographic Distribution
+        *Map visualization would appear here showing trial locations*
+        
+        This would display an interactive world map with markers for each trial location.
+        """)
+    
+    # Enrollment by Country
+    enrollment_by_country = filtered_df.groupby('Country')['Enrollment'].sum().sort_values(ascending=False).head(10)
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    enrollment_by_country.plot(kind='bar', color='teal', ax=ax)
+    plt.title('Total Enrollment by Country (Top 10)')
+    plt.xlabel('Country')
+    plt.ylabel('Total Participants')
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
+
+with tab4:
+    st.header("Detailed Trial Information")
+    
+    # Search functionality
+    search_term = st.text_input("Search trials by title or NCT number:")
+    if search_term:
+        display_df = filtered_df[
+            filtered_df['Study Title'].str.contains(search_term, case=False) | 
+            filtered_df['NCT Number'].str.contains(search_term, case=False)
+        ]
+    else:
+        display_df = filtered_df
+    
+    # Detailed table view
+    st.dataframe(
+        display_df[[
+            'NCT Number', 'Study Title', 'Study Status', 'Phases', 
+            'Enrollment', 'Start Date', 'Completion Date', 'Country',
+            'Interventions', 'Primary Outcome Measures'
+        ]].sort_values('Completion Date', ascending=False),
+        height=600,
+        use_container_width=True
+    )
+
+# Footer
+st.markdown("---")
+st.markdown("""
+**Data Source:** ClinicalTrials.gov  
+**Note:** This is a demo application for sickle cell anemia clinical trials analysis.
+""")
