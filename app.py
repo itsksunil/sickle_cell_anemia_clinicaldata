@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import numpy as np
-from datetime import datetime
 from wordcloud import WordCloud
+import os
 
 # Configure page
 st.set_page_config(
@@ -22,38 +21,44 @@ DRUG_LIST = [
     'Mycophenolate Mofetil', 'Treosulfan', 'Cannabis', 'ACTIQ'
 ]
 
-@st.cache_data
 def load_data():
     try:
-        # Try reading CSV file
-        df = pd.read_csv('sca.csv')
+        # Verify file exists
+        if not os.path.exists('sca.csv'):
+            st.error("Error: sca.csv file not found in the current directory.")
+            st.error("Please ensure:")
+            st.error("1. Your CSV file is named 'sca.csv'")
+            st.error("2. It's in the same folder as this app")
+            return None
+            
+        # Read CSV with error handling
+        df = pd.read_csv('sca.csv', encoding='utf-8', engine='python')
         
-        # Basic data validation
         if df.empty:
-            st.error("The dataset is empty. Please check your file.")
+            st.error("The CSV file is empty.")
             return None
             
         # Clean and preprocess
         df.fillna('Unknown', inplace=True)
         
-        # Standardize drug names in Interventions
+        # Drug extraction
         def extract_drugs(text):
+            if pd.isna(text):
+                return ['Other']
             found_drugs = []
-            if isinstance(text, str):
-                for drug in DRUG_LIST:
-                    if drug.lower() in text.lower():
-                        found_drugs.append(drug)
+            for drug in DRUG_LIST:
+                if drug.lower() in str(text).lower():
+                    found_drugs.append(drug)
             return found_drugs if found_drugs else ['Other']
         
         df['Drugs'] = df['Interventions'].apply(extract_drugs)
         df = df.explode('Drugs')
         
         # Date processing
-        date_cols = ['Start Date', 'Completion Date', 'Primary Completion Date']
+        date_cols = [col for col in ['Start Date', 'Completion Date'] if col in df.columns]
         for col in date_cols:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce')
-                df[f"{col.split()[0]}_Year"] = df[col].dt.year
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+            df[f"{col.split()[0]}_Year"] = df[col].dt.year
         
         # Numeric columns
         if 'Enrollment' in df.columns:
@@ -61,169 +66,62 @@ def load_data():
             
         return df
     
-    except FileNotFoundError:
-        st.error("Error: File 'sca.csv' not found. Please ensure:")
-        st.error("1. The file is named 'sca.csv'")
-        st.error("2. It's in the same directory as this app")
-        return None
     except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
+        st.error(f"Failed to load data: {str(e)}")
         return None
 
-# Load data
-df = load_data()
-if df is None:
-    st.stop()
-
-# Title
-st.title("🩸 Sickle Cell Disease Clinical Trials Analysis")
-st.markdown("""
-**Comparative analysis of therapeutic interventions**  
-Explore effectiveness across different studies.
-""")
-
-# Sidebar filters
-st.sidebar.header("🔍 Filter Options")
-
-# Drug selection
-selected_drugs = st.sidebar.multiselect(
-    "Select Interventions/Drugs:",
-    options=DRUG_LIST + ['Other'],
-    default=['Hydroxyurea', 'Sirolimus']
-)
-
-# Status filter
-status_options = sorted(df['Study Status'].unique())
-selected_status = st.sidebar.multiselect(
-    "Study Status:",
-    options=status_options,
-    default=['Completed', 'Recruiting']
-)
-
-# Phase filter
-phase_options = sorted([p for p in df['Phases'].unique() if p != 'Unknown'])
-selected_phase = st.sidebar.multiselect(
-    "Phase:",
-    options=phase_options,
-    default=phase_options
-)
-
-# Apply filters
-filtered_df = df[
-    (df['Drugs'].isin(selected_drugs)) &
-    (df['Study Status'].isin(selected_status)) &
-    (df['Phases'].isin(selected_phase))
-]
-
-# Main analysis tabs
-tab1, tab2, tab3 = st.tabs(["📊 Drug Analysis", "📈 Outcomes", "🔍 Study Browser"])
-
-with tab1:
-    st.header("Therapeutic Intervention Comparison")
+# Main app
+def main():
+    st.title("🩸 Sickle Cell Disease Clinical Trials Analysis")
     
-    if not filtered_df.empty:
-        col1, col2 = st.columns(2)
-        
-        # Trials by drug and phase
-        with col1:
-            st.subheader("Studies by Drug and Phase")
-            phase_counts = filtered_df.groupby(['Drugs', 'Phases']).size().unstack()
-            phase_counts.plot(kind='bar', stacked=True, figsize=(10,6))
+    # Load data
+    df = load_data()
+    if df is None:
+        st.stop()
+    
+    # Show raw data preview
+    if st.checkbox("Show raw data preview"):
+        st.write(df.head())
+    
+    # Filters
+    st.sidebar.header("Filters")
+    
+    # Drug selection
+    available_drugs = sorted(df['Drugs'].unique())
+    selected_drugs = st.sidebar.multiselect(
+        "Select drugs:",
+        options=available_drugs,
+        default=['Hydroxyurea', 'Sirolimus'] if 'Hydroxyurea' in available_drugs else available_drugs[:2]
+    )
+    
+    # Filter data
+    filtered_df = df[df['Drugs'].isin(selected_drugs)] if selected_drugs else df
+    
+    # Analysis
+    st.header("Basic Analysis")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Studies by Phase")
+        if 'Phases' in filtered_df.columns:
+            phase_counts = filtered_df['Phases'].value_counts()
+            plt.figure(figsize=(8,4))
+            phase_counts.plot(kind='bar')
             plt.xticks(rotation=45)
-            plt.ylabel("Number of Studies")
-            plt.tight_layout()
             st.pyplot(plt)
-        
-        # Enrollment distribution
-        with col2:
-            st.subheader("Enrollment Distribution")
-            plt.figure(figsize=(10,6))
-            for drug in selected_drugs:
-                subset = filtered_df[filtered_df['Drugs'] == drug]
-                plt.hist(subset['Enrollment'], alpha=0.5, label=drug, bins=20)
-            plt.xlabel("Number of Participants")
-            plt.ylabel("Frequency")
-            plt.legend()
+    
+    with col2:
+        st.subheader("Study Status")
+        if 'Study Status' in filtered_df.columns:
+            status_counts = filtered_df['Study Status'].value_counts()
+            plt.figure(figsize=(8,4))
+            plt.pie(status_counts, labels=status_counts.index, autopct='%1.1f%%')
             st.pyplot(plt)
-            
-        # Completion rates
-        st.subheader("Completion Status")
-        status_counts = filtered_df['Study Status'].value_counts()
-        plt.figure(figsize=(8,6))
-        plt.pie(status_counts, labels=status_counts.index, autopct='%1.1f%%')
-        st.pyplot(plt)
-        
-    else:
-        st.warning("No data matching selected filters")
+    
+    # Data table
+    st.header("Study Data")
+    st.dataframe(filtered_df[['NCT Number', 'Study Title', 'Drugs', 'Phases', 'Study Status']])
 
-with tab2:
-    st.header("Outcomes Analysis")
-    
-    if not filtered_df.empty:
-        # Outcome measures word cloud
-        st.subheader("Frequent Outcome Measures")
-        text = ' '.join(filtered_df['Primary Outcome Measures'].dropna().astype(str))
-        
-        if text.strip():
-            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
-            plt.figure(figsize=(10,5))
-            plt.imshow(wordcloud, interpolation='bilinear')
-            plt.axis("off")
-            st.pyplot(plt)
-        else:
-            st.warning("No outcome measures data available")
-        
-        # Conditions analysis
-        st.subheader("Associated Conditions")
-        if 'Conditions' in filtered_df.columns:
-            conditions = filtered_df['Conditions'].value_counts().head(10)
-            plt.figure(figsize=(10,5))
-            conditions.plot(kind='barh')
-            plt.xlabel("Number of Studies")
-            st.pyplot(plt)
-    else:
-        st.warning("No data available for outcomes analysis")
-
-with tab3:
-    st.header("Study Browser")
-    
-    # Search functionality
-    search_term = st.text_input("Search studies by title, drug, or NCT number:")
-    
-    if search_term:
-        search_results = df[
-            df['Study Title'].str.contains(search_term, case=False) |
-            df['Interventions'].str.contains(search_term, case=False) |
-            df['NCT Number'].str.contains(search_term, case=False)
-        ]
-    else:
-        search_results = filtered_df
-    
-    if not search_results.empty:
-        # Display important columns
-        st.dataframe(
-            search_results[[
-                'NCT Number', 'Study Title', 'Study Status', 'Phases',
-                'Drugs', 'Enrollment', 'Start Date', 'Completion Date',
-                'Conditions', 'Locations'
-            ]].sort_values('Completion Date', ascending=False),
-            height=600,
-            use_container_width=True
-        )
-        
-        # Export option
-        st.download_button(
-            label="📥 Export Selected Studies",
-            data=search_results.to_csv(index=False),
-            file_name="scd_studies_export.csv",
-            mime="text/csv"
-        )
-    else:
-        st.warning("No studies match your search criteria")
-
-# Footer
-st.markdown("---")
-st.markdown("""
-**Data Source:** ClinicalTrials.gov | **Analysis:** SCD Research Dashboard  
-*For research purposes only - consult medical professionals for treatment decisions*
-""")
+if __name__ == "__main__":
+    main()
