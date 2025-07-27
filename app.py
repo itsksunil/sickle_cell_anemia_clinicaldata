@@ -50,7 +50,7 @@ start_min = df['Start Date'].min()
 start_max = df['Start Date'].max()
 date_range = st.sidebar.date_input("Start Date Range", [start_min, start_max])
 
-# Filtering after inputs
+# Filtering
 filtered_df = df[
     (df['Sex'].isin(selected_sex)) &
     (df['Age'].isin(selected_age)) &
@@ -65,7 +65,7 @@ filtered_df = df[
 if selected_meds:
     filtered_df = filtered_df[filtered_df['Interventions'].apply(lambda x: any(m in x for m in selected_meds))]
 
-# Medicine bubble chart data
+# Medicine bubble chart
 exploded = df[['NCT Number', 'Interventions']].copy()
 exploded['Interventions'] = exploded['Interventions'].str.split(';')
 exploded = exploded.explode('Interventions')
@@ -77,18 +77,15 @@ fig = px.scatter(med_count, x="Medicine", y="Trial Count", size="Trial Count", c
                  title="Number of Trials Using Each Medicine")
 fig.update_layout(xaxis_tickangle=-45)
 
-# Pie chart for phases distribution
+# Pie chart for trial phases
 phase_counts = filtered_df['Phases'].value_counts().reset_index()
 phase_counts.columns = ['Phase', 'Trial Count']
 phase_pie = px.pie(phase_counts, names='Phase', values='Trial Count',
                    title='Distribution of Filtered Trials by Clinical Trial Phase',
-                   hole=0.4,
-                   labels={'Phase': 'Trial Phase', 'Trial Count': 'Number of Trials'},
-                   hover_data=['Trial Count'])
-phase_pie.update_traces(textposition='inside', textinfo='percent+label')
+                   hole=0.4)
 
+# Outcome grouping
 highlight_terms = ['hemoglobin', 'pain', 'hospitalization', 'vaso-occlusive', 'crisis', 'transfusion', 'fatigue']
-
 def highlight_common(text):
     for term in highlight_terms:
         pattern = re.compile(rf"\b({term})\b", flags=re.IGNORECASE)
@@ -124,51 +121,63 @@ for i, group in enumerate(groups):
 
 pie_df = pd.DataFrame(pie_data.items(), columns=['Group', 'Trial Count'])
 
-if not pie_df.empty:
-    outcome_pie_chart = px.pie(pie_df, names='Group', values='Trial Count', title="Distribution of Similar Outcome Groups", hole=0.4)
-else:
-    outcome_pie_chart = None
+outcome_pie_chart = px.pie(pie_df, names='Group', values='Trial Count',
+                           title="Distribution of Similar Outcome Groups", hole=0.4) if not pie_df.empty else None
 
+# Fixed PDF generation
 def generate_pdf_from_df(df):
+    def safe_text(text):
+        return str(text).encode('latin-1', 'replace').decode('latin-1')
+
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     pdf.cell(200, 10, txt="Sickle Cell Anemia Trial Summary", ln=True, align='C')
+
     for _, row in df.iterrows():
         pdf.set_font("Arial", 'B', size=11)
-        pdf.multi_cell(0, 10, f"{row['Study Title']} (NCT: {row['NCT Number']})")
+        pdf.multi_cell(0, 10, safe_text(f"{row['Study Title']} (NCT: {row['NCT Number']})"))
         pdf.set_font("Arial", size=10)
-        pdf.multi_cell(0, 8, f"URL: {row['Study URL']}")
-        pdf.multi_cell(0, 8, f"Location: {row.get('Locations', 'N/A')}")
-        pdf.multi_cell(0, 8, f"Enrollment: {row.get('Enrollment', 'N/A')}")
-        pdf.multi_cell(0, 8, f"Interventions: {row.get('Interventions', 'N/A')}")
+        pdf.multi_cell(0, 8, safe_text(f"URL: {row.get('Study URL', '')}"))
+        pdf.multi_cell(0, 8, safe_text(f"Location: {row.get('Locations', 'N/A')}"))
+        pdf.multi_cell(0, 8, safe_text(f"Enrollment: {row.get('Enrollment', 'N/A')}"))
+        pdf.multi_cell(0, 8, safe_text(f"Interventions: {row.get('Interventions', 'N/A')}"))
+
         pdf.set_font("Arial", 'B', size=10)
         pdf.cell(0, 8, "Primary Outcome:", ln=True)
         pdf.set_font("Arial", size=10)
-        pdf.multi_cell(0, 8, row.get("Primary Outcome Measures", ""))
+        pdf.multi_cell(0, 8, safe_text(row.get("Primary Outcome Measures", "")))
+
         pdf.set_font("Arial", 'B', size=10)
         pdf.cell(0, 8, "Secondary Outcome:", ln=True)
         pdf.set_font("Arial", size=10)
-        pdf.multi_cell(0, 8, row.get("Secondary Outcome Measures", ""))
+        pdf.multi_cell(0, 8, safe_text(row.get("Secondary Outcome Measures", "")))
+
         pdf.set_font("Arial", 'B', size=10)
         pdf.cell(0, 8, "Other Outcome:", ln=True)
         pdf.set_font("Arial", size=10)
-        pdf.multi_cell(0, 8, row.get("Other Outcome Measures", ""))
+        pdf.multi_cell(0, 8, safe_text(row.get("Other Outcome Measures", "")))
+
         pdf.ln(5)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(3)
+
     buffer = io.BytesIO()
     pdf.output(buffer)
     buffer.seek(0)
     return buffer
 
-total_trials = df.shape[0]
-
-tab1, tab2, tab3, tab4 = st.tabs(["Trial Data & Visuals", "Outcome Similarity Pie Chart", "PDF Report Download", "Phases Distribution Pie Chart"])
+# Tabs
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Trial Data & Visuals",
+    "Outcome Similarity Pie Chart",
+    "PDF Report Download",
+    "Phases Distribution Pie Chart"
+])
 
 with tab1:
-    st.markdown(f"### Total Trials in Dataset: **{total_trials}**")
+    st.markdown(f"### Total Trials in Dataset: **{df.shape[0]}**")
     st.dataframe(df[['NCT Number', 'Study Title']], use_container_width=True)
 
     st.markdown("---")
@@ -181,7 +190,6 @@ with tab1:
 
     st.markdown("---")
     st.subheader("🔬 View Trials by Medicine")
-
     selected_med = st.selectbox("Select a Medicine", med_count['Medicine'].unique())
     related_trials = df[df['Interventions'].str.contains(selected_med, na=False)]
 
@@ -201,11 +209,11 @@ with tab1:
         st.markdown("---")
 
 with tab2:
-    st.subheader("📊 Pie Chart of Outcome Similarity Groups")
+    st.subheader("📊 Outcome Similarity Pie Chart")
     if outcome_pie_chart:
         st.plotly_chart(outcome_pie_chart, use_container_width=True)
     else:
-        st.info("Not enough similar outcome groups to display pie chart.")
+        st.info("Not enough similar outcomes to display chart.")
 
 with tab3:
     st.subheader("📄 Download Trial Summary as PDF")
@@ -221,14 +229,11 @@ with tab4:
     if not phase_counts.empty:
         st.plotly_chart(phase_pie, use_container_width=True)
         st.markdown("""
-        This pie chart shows how many clinical trials in the filtered data belong to each clinical trial phase.
-        
         **Phases Explained:**
         - **Phase 1:** Safety testing with small groups.
-        - **Phase 2:** Effectiveness and side effects with larger groups.
-        - **Phase 3:** Confirm effectiveness, monitor side effects, compare to commonly used treatments.
-        - **Phase 4:** Post-marketing studies to delineate additional information including the drug's risks, benefits, and optimal use.
-        - **N/A or Other:** Trials not categorized or observational studies.
+        - **Phase 2:** Effectiveness and side effects.
+        - **Phase 3:** Confirm effectiveness, monitor side effects.
+        - **Phase 4:** Post-marketing studies.
         """)
     else:
-        st.info("No phase data available for current filtered trials.")
+        st.info("No data available for selected filters.")
