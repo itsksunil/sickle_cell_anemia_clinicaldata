@@ -25,28 +25,30 @@ def load_data():
 
 df = load_data()
 
-# Sidebar Filters
+# Sidebar Filters as dropdown multi-selects
 st.sidebar.header("🔎 Filter Options")
 
 sexes = df['Sex'].dropna().unique().tolist()
-selected_sex = st.sidebar.multiselect("Select Sex", sexes, default=sexes)
+selected_sex = st.sidebar.multiselect("Select Sex", options=sexes, default=sexes)
 
 ages = df['Age'].dropna().unique().tolist()
-selected_age = st.sidebar.multiselect("Select Age Range", ages, default=ages)
+selected_age = st.sidebar.multiselect("Select Age Range", options=ages, default=ages)
 
 locations = df['Locations'].dropna().unique().tolist()
-selected_locations = st.sidebar.multiselect("Select Location(s)", locations, default=locations)
+selected_locations = st.sidebar.multiselect("Select Location(s)", options=locations, default=locations)
 
-start_min = df['Start Date'].min()
-start_max = df['Start Date'].max()
-date_range = st.sidebar.date_input("Start Date Range", [start_min, start_max])
+medicines = df['Interventions'].dropna().unique().tolist()
+selected_meds = st.sidebar.multiselect("Select Medicines", options=medicines)
 
+# Enrollment range slider (numeric)
 enroll_min = int(df['Enrollment'].min())
 enroll_max = int(df['Enrollment'].max())
 enroll_range = st.sidebar.slider("Enrollment Range", enroll_min, enroll_max, (enroll_min, enroll_max))
 
-medicines = df['Interventions'].dropna().unique().tolist()
-selected_meds = st.sidebar.multiselect("Select Medicines", medicines)
+# Date range picker
+start_min = df['Start Date'].min()
+start_max = df['Start Date'].max()
+date_range = st.sidebar.date_input("Start Date Range", [start_min, start_max])
 
 # Apply Filters
 filtered_df = df[
@@ -62,13 +64,7 @@ filtered_df = df[
 if selected_meds:
     filtered_df = filtered_df[filtered_df['Interventions'].apply(lambda x: any(m in x for m in selected_meds))]
 
-st.subheader(f"📋 Filtered Trials: {filtered_df.shape[0]}")
-st.dataframe(filtered_df[['NCT Number', 'Study Title', 'Sex', 'Age', 'Enrollment', 'Locations', 'Start Date', 'Interventions']], use_container_width=True)
-
 # Bubble Chart for Medicine Frequency
-st.markdown("---")
-st.subheader("💊 Medicine Frequency in Trials")
-
 exploded = df[['NCT Number', 'Interventions']].copy()
 exploded['Interventions'] = exploded['Interventions'].str.split(';')
 exploded = exploded.explode('Interventions')
@@ -79,15 +75,8 @@ med_count.columns = ['Medicine', 'Trial Count']
 fig = px.scatter(med_count, x="Medicine", y="Trial Count", size="Trial Count", color="Trial Count", height=600,
                  title="Number of Trials Using Each Medicine")
 fig.update_layout(xaxis_tickangle=-45)
-st.plotly_chart(fig, use_container_width=True)
 
-# View Trials by Selected Medicine
-st.markdown("---")
-st.subheader("🔬 View Trials by Medicine")
-
-selected_med = st.selectbox("Select a Medicine", med_count['Medicine'].unique())
-related_trials = df[df['Interventions'].str.contains(selected_med, na=False)]
-
+# Highlight terms function
 highlight_terms = ['hemoglobin', 'pain', 'hospitalization', 'vaso-occlusive', 'crisis', 'transfusion', 'fatigue']
 
 def highlight_common(text):
@@ -96,25 +85,7 @@ def highlight_common(text):
         text = pattern.sub(r"🔹 **\1**", text)
     return text
 
-st.markdown(f"### Trials with **{selected_med}**")
-for _, row in related_trials.iterrows():
-    st.markdown(f"**{row['Study Title']}**")
-    st.markdown(f"[🔗 View on ClinicalTrials.gov]({row['Study URL']})", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("**Primary Outcome**")
-        st.markdown(highlight_common(row.get('Primary Outcome Measures', '')), unsafe_allow_html=True)
-    with col2:
-        st.markdown("**Secondary Outcome**")
-        st.markdown(highlight_common(row.get('Secondary Outcome Measures', '')), unsafe_allow_html=True)
-    with col3:
-        st.markdown("**Other Outcome**")
-        st.markdown(highlight_common(row.get('Other Outcome Measures', '')), unsafe_allow_html=True)
-    st.markdown("---")
-
-# Similar Outcome Groups
-st.subheader("🔗 Similar Outcome Groups")
-
+# Similar Outcome Groups & Pie Chart
 def group_similar_outcomes(df):
     texts = df['Primary Outcome Measures'].tolist()
     vectorizer = TfidfVectorizer(stop_words='english')
@@ -138,18 +109,6 @@ outcome_texts = df[['NCT Number', 'Study Title', 'Primary Outcome Measures', 'St
 outcome_texts = outcome_texts[outcome_texts['Primary Outcome Measures'] != ""]
 groups = group_similar_outcomes(outcome_texts)
 
-shown = set()
-for i, group in enumerate(groups):
-    st.markdown(f"#### 🔸 Group {i+1}")
-    for idx in group:
-        row = outcome_texts.iloc[idx]
-        st.markdown(f"- [{row['Study Title']}]({row['Study URL']})")
-        st.markdown(f"  ↪ {highlight_common(row['Primary Outcome Measures'])}")
-    st.markdown("---")
-
-# Pie Chart of Similar Groups
-st.subheader("📊 Pie Chart of Outcome Similarity Groups")
-
 pie_data = defaultdict(int)
 for i, group in enumerate(groups):
     pie_data[f"Group {i+1}"] = len(group)
@@ -158,11 +117,10 @@ pie_df = pd.DataFrame(pie_data.items(), columns=['Group', 'Trial Count'])
 
 if not pie_df.empty:
     pie_chart = px.pie(pie_df, names='Group', values='Trial Count', title="Distribution of Similar Outcome Groups", hole=0.4)
-    st.plotly_chart(pie_chart, use_container_width=True)
+else:
+    pie_chart = None
 
 # PDF Report Generator
-st.subheader("📄 Download Trial Summary as PDF")
-
 def generate_pdf_from_df(df):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -197,10 +155,50 @@ def generate_pdf_from_df(df):
     buffer.seek(0)
     return buffer
 
-if st.button("Generate PDF Report"):
-    pdf_file = generate_pdf_from_df(filtered_df)
-    st.download_button("⬇️ Download PDF", data=pdf_file, file_name="SCA_Trial_Summary.pdf", mime="application/pdf")
+# Tabs layout
+tab1, tab2, tab3 = st.tabs(["Trial Data & Visuals", "Outcome Similarity Pie Chart", "PDF Report Download"])
 
-# Download CSV
-st.subheader("📥 Download Filtered Data")
-st.download_button("⬇️ Download CSV", data=filtered_df.to_csv(index=False), file_name="filtered_sca_trials.csv", mime="text/csv")
+with tab1:
+    st.subheader(f"📋 Filtered Trials: {filtered_df.shape[0]}")
+    st.dataframe(filtered_df[['NCT Number', 'Study Title', 'Sex', 'Age', 'Enrollment', 'Locations', 'Start Date', 'Interventions']], use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("💊 Medicine Frequency in Trials")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("🔬 View Trials by Medicine")
+
+    selected_med = st.selectbox("Select a Medicine", med_count['Medicine'].unique())
+    related_trials = df[df['Interventions'].str.contains(selected_med, na=False)]
+
+    for _, row in related_trials.iterrows():
+        st.markdown(f"**{row['Study Title']}**")
+        st.markdown(f"[🔗 View on ClinicalTrials.gov]({row['Study URL']})", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("**Primary Outcome**")
+            st.markdown(highlight_common(row.get('Primary Outcome Measures', '')), unsafe_allow_html=True)
+        with col2:
+            st.markdown("**Secondary Outcome**")
+            st.markdown(highlight_common(row.get('Secondary Outcome Measures', '')), unsafe_allow_html=True)
+        with col3:
+            st.markdown("**Other Outcome**")
+            st.markdown(highlight_common(row.get('Other Outcome Measures', '')), unsafe_allow_html=True)
+        st.markdown("---")
+
+with tab2:
+    st.subheader("📊 Pie Chart of Outcome Similarity Groups")
+    if pie_chart:
+        st.plotly_chart(pie_chart, use_container_width=True)
+    else:
+        st.info("Not enough similar outcome groups to display pie chart.")
+
+with tab3:
+    st.subheader("📄 Download Trial Summary as PDF")
+    if st.button("Generate PDF Report"):
+        pdf_file = generate_pdf_from_df(filtered_df)
+        st.download_button("⬇️ Download PDF", data=pdf_file, file_name="SCA_Trial_Summary.pdf", mime="application/pdf")
+
+    st.subheader("📥 Download Filtered Data as CSV")
+    st.download_button("⬇️ Download CSV", data=filtered_df.to_csv(index=False), file_name="filtered_sca_trials.csv", mime="text/csv")
