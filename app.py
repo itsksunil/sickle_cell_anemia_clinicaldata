@@ -172,10 +172,17 @@ def generate_pdf_from_df(df):
     buffer.seek(0)
     return buffer
 
+# Total trials count
+total_trials = df.shape[0]
+
 # Tabs layout
 tab1, tab2, tab3, tab4 = st.tabs(["Trial Data & Visuals", "Outcome Similarity Pie Chart", "PDF Report Download", "Phases Distribution Pie Chart"])
 
 with tab1:
+    st.markdown(f"### Total Trials in Dataset: **{total_trials}**")
+    st.dataframe(df[['NCT Number', 'Study Title']], use_container_width=True)
+
+    st.markdown("---")
     st.subheader(f"📋 Filtered Trials: {filtered_df.shape[0]}")
     st.dataframe(filtered_df[['NCT Number', 'Study Title', 'Sex', 'Age', 'Enrollment', 'Locations', 'Phases', 'Start Date', 'Interventions']], use_container_width=True)
 
