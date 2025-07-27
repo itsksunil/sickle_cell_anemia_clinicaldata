@@ -13,7 +13,6 @@ st.set_page_config(page_title="Sickle Cell Anemia Clinical Trials", layout="wide
 st.title("🩸 Sickle Cell Anemia Clinical Trials Dashboard")
 st.markdown("Explore, filter, and analyze clinical trials related to **Sickle Cell Anemia**.")
 
-# Load Data
 @st.cache_data
 def load_data():
     df = pd.read_csv("sca.csv")
@@ -30,33 +29,28 @@ df = load_data()
 st.sidebar.header("🔎 Filter Options")
 
 sexes = df['Sex'].dropna().unique().tolist()
-selected_sex = st.sidebar.multiselect("Select Sex", options=sexes, default=sexes)
-
 ages = df['Age'].dropna().unique().tolist()
-selected_age = st.sidebar.multiselect("Select Age Range", options=ages, default=ages)
-
 locations = df['Locations'].dropna().unique().tolist()
-selected_locations = st.sidebar.multiselect("Select Location(s)", options=locations, default=locations)
-
 phases = df['Phases'].dropna().unique().tolist()
-selected_phases = st.sidebar.multiselect("Select Phase(s)", options=phases, default=phases)
-
 medicines = df['Interventions'].dropna().unique().tolist()
+
+selected_sex = st.sidebar.multiselect("Select Sex", options=sexes, default=sexes)
+selected_age = st.sidebar.multiselect("Select Age Range", options=ages, default=ages)
+selected_locations = st.sidebar.multiselect("Select Location(s)", options=locations, default=locations)
+selected_phases = st.sidebar.multiselect("Select Phase(s)", options=phases, default=phases)
 selected_meds = st.sidebar.multiselect("Select Medicines", options=medicines)
 
-# Enrollment numeric inputs
 enroll_min_val = int(df['Enrollment'].min())
 enroll_max_val = int(df['Enrollment'].max())
 
 enroll_min = st.sidebar.number_input("Min Enrollment", min_value=0, max_value=enroll_max_val, value=enroll_min_val, step=1)
 enroll_max = st.sidebar.number_input("Max Enrollment", min_value=enroll_min, max_value=enroll_max_val, value=enroll_max_val, step=1)
 
-# Date range picker
 start_min = df['Start Date'].min()
 start_max = df['Start Date'].max()
 date_range = st.sidebar.date_input("Start Date Range", [start_min, start_max])
 
-# Apply Filters
+# Filtering after inputs
 filtered_df = df[
     (df['Sex'].isin(selected_sex)) &
     (df['Age'].isin(selected_age)) &
@@ -71,7 +65,7 @@ filtered_df = df[
 if selected_meds:
     filtered_df = filtered_df[filtered_df['Interventions'].apply(lambda x: any(m in x for m in selected_meds))]
 
-# Bubble Chart for Medicine Frequency
+# Medicine bubble chart data
 exploded = df[['NCT Number', 'Interventions']].copy()
 exploded['Interventions'] = exploded['Interventions'].str.split(';')
 exploded = exploded.explode('Interventions')
@@ -83,7 +77,7 @@ fig = px.scatter(med_count, x="Medicine", y="Trial Count", size="Trial Count", c
                  title="Number of Trials Using Each Medicine")
 fig.update_layout(xaxis_tickangle=-45)
 
-# Detailed Pie Chart: Trial distribution by Phases
+# Pie chart for phases distribution
 phase_counts = filtered_df['Phases'].value_counts().reset_index()
 phase_counts.columns = ['Phase', 'Trial Count']
 phase_pie = px.pie(phase_counts, names='Phase', values='Trial Count',
@@ -93,7 +87,6 @@ phase_pie = px.pie(phase_counts, names='Phase', values='Trial Count',
                    hover_data=['Trial Count'])
 phase_pie.update_traces(textposition='inside', textinfo='percent+label')
 
-# Highlight terms function
 highlight_terms = ['hemoglobin', 'pain', 'hospitalization', 'vaso-occlusive', 'crisis', 'transfusion', 'fatigue']
 
 def highlight_common(text):
@@ -102,7 +95,6 @@ def highlight_common(text):
         text = pattern.sub(r"🔹 **\1**", text)
     return text
 
-# Similar Outcome Groups & Pie Chart
 def group_similar_outcomes(df):
     texts = df['Primary Outcome Measures'].tolist()
     vectorizer = TfidfVectorizer(stop_words='english')
@@ -137,7 +129,6 @@ if not pie_df.empty:
 else:
     outcome_pie_chart = None
 
-# PDF Report Generator
 def generate_pdf_from_df(df):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -172,10 +163,8 @@ def generate_pdf_from_df(df):
     buffer.seek(0)
     return buffer
 
-# Total trials count
 total_trials = df.shape[0]
 
-# Tabs layout
 tab1, tab2, tab3, tab4 = st.tabs(["Trial Data & Visuals", "Outcome Similarity Pie Chart", "PDF Report Download", "Phases Distribution Pie Chart"])
 
 with tab1:
