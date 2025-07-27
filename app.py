@@ -9,7 +9,7 @@ plt.style.use('ggplot')
 # Load and cache the data
 @st.cache_data
 def load_data():
-    df = pd.read_csv('cancer_survivor_data.csv')
+    df = pd.read_csv('sickle_cell_anemia_clinicaldata.csv')
     df.fillna('', inplace=True)
     df['Completion Date'] = pd.to_datetime(df['Completion Date'], errors='coerce')
     df['Completion Year'] = df['Completion Date'].dt.year
@@ -18,7 +18,7 @@ def load_data():
 
 df = load_data()
 
-st.title("Cancer Survivor Trials Explorer 1700+ clinical trial 🧬")
+st.title("sickle cell anemiaclinicaldataTrials Explorer 1700+ clinical trial 🧬")
 
 # Utility: extract unique keywords from pipe-separated fields
 def get_unique_keywords(series):
