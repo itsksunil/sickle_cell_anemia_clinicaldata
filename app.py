@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import plotly.express as px
 from datetime import datetime
 from wordcloud import WordCloud
 
@@ -13,7 +12,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Known drug/intervention list
+# Known drug list
 DRUG_LIST = [
     'Hydroxyurea', 'GSK4172239D', 'Sirolimus', 'Arginine', 'Glutamine',
     'Folic Acid', 'SANGUINATE', 'Ketamine', 'Alemtuzumab', 'Fludarabine',
@@ -26,17 +25,14 @@ DRUG_LIST = [
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_excel('sca_trials.xlsx')  # Changed to read Excel
+        df = pd.read_excel('sca_trials.xlsx')
         
-        # Basic data validation
         if df.empty:
             st.error("The dataset is empty. Please check your file.")
             return None
             
-        # Clean and preprocess
         df.fillna('Unknown', inplace=True)
         
-        # Standardize drug names in Interventions
         def extract_drugs(text):
             found_drugs = []
             if isinstance(text, str):
@@ -48,14 +44,12 @@ def load_data():
         df['Drugs'] = df['Interventions'].apply(extract_drugs)
         df = df.explode('Drugs')
         
-        # Date processing
-        date_cols = ['Start Date', 'Completion Date', 'Primary Completion Date']
+        date_cols = ['Start Date', 'Completion Date']
         for col in date_cols:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
                 df[f"{col.split()[0]}_Year"] = df[col].dt.year
         
-        # Numeric columns
         if 'Enrollment' in df.columns:
             df['Enrollment'] = pd.to_numeric(df['Enrollment'], errors='coerce').fillna(0).astype(int)
             
@@ -73,21 +67,19 @@ if df is None:
 # Title
 st.title("🩸 Sickle Cell Disease Clinical Trials Analysis")
 st.markdown("""
-**Comparative analysis of therapeutic interventions**  
-Explore effectiveness across different studies.
+**Basic version with core functionality**  
+Drug comparison and study analysis.
 """)
 
 # Sidebar filters
 st.sidebar.header("🔍 Filter Options")
 
-# Drug selection
 selected_drugs = st.sidebar.multiselect(
     "Select Interventions/Drugs:",
     options=DRUG_LIST + ['Other'],
     default=['Hydroxyurea', 'Sirolimus']
 )
 
-# Status filter
 status_options = sorted(df['Study Status'].unique())
 selected_status = st.sidebar.multiselect(
     "Study Status:",
@@ -95,7 +87,6 @@ selected_status = st.sidebar.multiselect(
     default=['Completed', 'Recruiting']
 )
 
-# Phase filter
 phase_options = sorted([p for p in df['Phases'].unique() if p != 'Unknown'])
 selected_phase = st.sidebar.multiselect(
     "Phase:",
@@ -110,158 +101,91 @@ filtered_df = df[
     (df['Phases'].isin(selected_phase))
 ]
 
-# Main analysis tabs
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Drug Comparison", 
-    "🌍 Geographic View", 
-    "📈 Outcomes Analysis",
-    "🔍 Study Browser"
-])
+# Main tabs
+tab1, tab2, tab3 = st.tabs(["📊 Drug Analysis", "📈 Outcomes", "🔍 Studies"])
 
 with tab1:
-    st.header("Therapeutic Intervention Comparison")
+    st.header("Drug Comparison")
     
     if not filtered_df.empty:
-        # Drug efficacy metrics
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Studies", len(filtered_df['NCT Number'].unique()))
-        col2.metric("Avg Enrollment", int(filtered_df['Enrollment'].mean()))
+        col1, col2 = st.columns(2)
         
-        # Success rate calculation (simplified)
-        completed = filtered_df[filtered_df['Study Status'] == 'Completed']
-        success_rate = len(completed) / len(filtered_df) * 100 if len(filtered_df) > 0 else 0
-        col3.metric("Completion Rate", f"{success_rate:.1f}%")
+        with col1:
+            st.subheader("Studies by Phase")
+            phase_counts = filtered_df.groupby(['Drugs', 'Phases']).size().unstack()
+            phase_counts.plot(kind='bar', stacked=True, figsize=(10,6))
+            plt.xticks(rotation=45)
+            plt.ylabel("Number of Studies")
+            plt.tight_layout()
+            st.pyplot(plt)
         
-        # Drug distribution by phase
-        fig = px.sunburst(
-            filtered_df,
-            path=['Drugs', 'Phases'],
-            color='Drugs',
-            color_discrete_sequence=px.colors.qualitative.Pastel
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Enrollment comparison
-        fig = px.box(
-            filtered_df,
-            x='Drugs',
-            y='Enrollment',
-            color='Phases',
-            points="all",
-            title="Enrollment Distribution by Drug"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            st.subheader("Enrollment Distribution")
+            plt.figure(figsize=(10,6))
+            for drug in selected_drugs:
+                subset = filtered_df[filtered_df['Drugs'] == drug]
+                plt.hist(subset['Enrollment'], alpha=0.5, label=drug, bins=20)
+            plt.xlabel("Number of Participants")
+            plt.ylabel("Frequency")
+            plt.legend()
+            st.pyplot(plt)
     else:
         st.warning("No data matching selected filters")
 
 with tab2:
-    st.header("Geographic Distribution of Studies")
-    
-    if not filtered_df.empty and 'Locations' in filtered_df.columns:
-        # Extract country from locations
-        filtered_df['Country'] = filtered_df['Locations'].str.split(',').str[-1].str.strip()
-        
-        # Map visualization
-        country_counts = filtered_df['Country'].value_counts().reset_index()
-        country_counts.columns = ['Country', 'Count']
-        
-        fig = px.choropleth(
-            country_counts,
-            locations='Country',
-            locationmode='country names',
-            color='Count',
-            hover_name='Country',
-            color_continuous_scale='Viridis',
-            title="Global Distribution of Selected Trials"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Country-drug matrix
-        pivot = pd.crosstab(filtered_df['Country'], filtered_df['Drugs'])
-        st.dataframe(
-            pivot.style.background_gradient(cmap='Blues'),
-            use_container_width=True
-        )
-    else:
-        st.warning("Location data not available for selected filters")
-
-with tab3:
-    st.header("Clinical Outcomes Analysis")
+    st.header("Outcomes Analysis")
     
     if not filtered_df.empty:
-        # Outcome measures word cloud
-        st.subheader("Frequent Outcome Measures")
-        text = ' '.join(filtered_df['Primary Outcome Measures'].dropna().astype(str))
+        col1, col2 = st.columns(2)
         
-        if text.strip():
-            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
-            plt.figure(figsize=(10, 5))
-            plt.imshow(wordcloud, interpolation='bilinear')
-            plt.axis("off")
+        with col1:
+            st.subheader("Outcome Measures")
+            text = ' '.join(filtered_df['Primary Outcome Measures'].dropna().astype(str))
+            if text.strip():
+                wordcloud = WordCloud(width=600, height=400, background_color='white').generate(text)
+                plt.figure(figsize=(10,6))
+                plt.imshow(wordcloud, interpolation='bilinear')
+                plt.axis("off")
+                st.pyplot(plt)
+            else:
+                st.warning("No outcome measures available")
+        
+        with col2:
+            st.subheader("Status Distribution")
+            status_counts = filtered_df['Study Status'].value_counts()
+            plt.figure(figsize=(6,6))
+            plt.pie(status_counts, labels=status_counts.index, autopct='%1.1f%%')
             st.pyplot(plt)
-        else:
-            st.warning("No outcome measures data available")
-        
-        # Success correlation matrix (simplified)
-        st.subheader("Drug-Success Correlation")
-        
-        # Create dummy success metric (in real app, use actual outcomes)
-        success_df = filtered_df.copy()
-        success_df['Success Score'] = np.random.randint(1, 100, size=len(success_df))
-        
-        fig = px.scatter(
-            success_df,
-            x='Drugs',
-            y='Success Score',
-            size='Enrollment',
-            color='Phases',
-            hover_name='Study Title',
-            title="Drug Effectiveness Comparison"
-        )
-        st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning("No data available for outcomes analysis")
+        st.warning("No data available for analysis")
 
-with tab4:
+with tab3:
     st.header("Study Browser")
     
-    # Search functionality
-    search_term = st.text_input("Search studies by title, drug, or NCT number:")
-    
+    search_term = st.text_input("Search studies:")
     if search_term:
-        search_results = df[
+        results = df[
             df['Study Title'].str.contains(search_term, case=False) |
             df['Interventions'].str.contains(search_term, case=False) |
             df['NCT Number'].str.contains(search_term, case=False)
         ]
     else:
-        search_results = filtered_df
+        results = filtered_df
     
-    if not search_results.empty:
-        # Enhanced data display
+    if not results.empty:
         st.dataframe(
-            search_results[[
+            results[[
                 'NCT Number', 'Study Title', 'Study Status', 'Phases',
-                'Drugs', 'Enrollment', 'Start Date', 'Completion Date',
-                'Locations', 'Primary Outcome Measures'
+                'Drugs', 'Enrollment', 'Completion Date', 'Locations'
             ]].sort_values('Completion Date', ascending=False),
             height=600,
             use_container_width=True
         )
-        
-        # Export option
-        st.download_button(
-            label="Export Selected Studies",
-            data=search_results.to_csv(index=False),
-            file_name="scd_studies_export.csv",
-            mime="text/csv"
-        )
     else:
-        st.warning("No studies match your search criteria")
+        st.warning("No matching studies found")
 
-# Footer
 st.markdown("---")
 st.markdown("""
-**Data Source:** ClinicalTrials.gov | **Analysis:** SCD Research Dashboard v2.0  
-*For research purposes only - consult medical professionals for treatment decisions*
+**Basic Analysis Version** | Data Source: ClinicalTrials.gov  
+*Using only core Python libraries for reliability*
 """)
